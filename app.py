@@ -1,19 +1,24 @@
 """
-Stern Stewart Case Interview — Production Server (Vercel Serverless)
-Uses Groq API (free) for AI. TTS handled client-side.
+Stern Stewart Case Interview — Production Server
+Groq API (free) for AI + edge-tts server-side for natural voice.
 Stateless: client sends full conversation history each request.
 """
 
 import os
 import json
-from flask import Flask, request, jsonify, send_from_directory
+import asyncio
+import tempfile
+import base64
+from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from openai import OpenAI
+import edge_tts
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
 MODEL = "llama-3.3-70b-versatile"
+TTS_VOICE = "de-DE-FlorianMultilingualNeural"
 
 SYSTEM_PROMPT = """You are Dr. Keller, Partner at Stern Stewart & Co. You are conducting a live case interview.
 
@@ -37,8 +42,8 @@ YOUR BEHAVIOR:
 - Push for precision in language, logic, and numbers
 - Interrupt if reasoning is unclear or inefficient
 - Apply realistic time pressure
-- CRITICAL: Keep responses SHORT — max 3-4 sentences. This is a spoken conversation, not a written one.
-- Do not use markdown formatting, asterisks, bullet points, or special characters. Write plain spoken German as if you are talking.
+- CRITICAL: Keep responses SHORT — max 3-4 sentences. This is a spoken conversation.
+- Do not use markdown formatting, asterisks, bullet points, or special characters. Write plain spoken German.
 
 CASE:
 A mid-sized European industrial valve manufacturer with 380 Millionen Euro Umsatz. Growth stagnated at 1 bis 2 Prozent per year for three years. CEO asks: Should we enter the North American market, and if so, how? Budget: up to 50 Millionen Euro.
@@ -53,7 +58,7 @@ CASE DATA (reveal progressively, only when relevant):
 - Client current ROIC: 14 Prozent, WACC: 9 Prozent
 - CEO wants decision within 6 months
 
-IMPORTANT: Write numbers as words or with digits, never use special symbols. Write Euro not the symbol. Write Dollar not the symbol. Write Prozent not the symbol. No bullet points or dashes. This text will be read aloud by a voice system."""
+IMPORTANT: Write numbers as words or digits, never symbols. Write Euro not the symbol. Write Dollar not the symbol. Write Prozent not the symbol. No bullet points or dashes. This text will be read aloud."""
 
 
 def get_client():
@@ -75,6 +80,28 @@ def call_llm(messages):
     return response.choices[0].message.content
 
 
+def generate_tts(text):
+    """Generate MP3 audio bytes using edge-tts."""
+    clean = text.replace('"', '').replace("'", "").replace("*", "").replace("#", "").replace("_", "")
+
+    async def _generate():
+        communicate = edge_tts.Communicate(clean, voice=TTS_VOICE, rate="-3%", pitch="-2Hz")
+        chunks = []
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                chunks.append(chunk["data"])
+        return b"".join(chunks)
+
+    try:
+        loop = asyncio.new_event_loop()
+        audio_bytes = loop.run_until_complete(_generate())
+        loop.close()
+        return audio_bytes
+    except Exception as e:
+        print(f"TTS error: {e}")
+        return None
+
+
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -87,25 +114,37 @@ def static_files(path):
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    """
-    Stateless chat endpoint.
-    Client sends full message history, server returns next assistant message.
-    """
     try:
         data = request.json
         messages = data.get("messages", [])
-
         if not messages:
-            return jsonify({"error": "No messages provided"}), 400
-
+            return jsonify({"error": "No messages"}), 400
         reply = call_llm(messages)
         return jsonify({"reply": reply})
-
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 500
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"error": "Server error. Please try again."}), 500
+        print(f"Chat error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/tts", methods=["POST"])
+def tts():
+    """Generate audio from text. Returns MP3 binary."""
+    try:
+        data = request.json
+        text = data.get("text", "")
+        if not text:
+            return jsonify({"error": "No text"}), 400
+
+        audio = generate_tts(text)
+        if audio and len(audio) > 0:
+            return Response(audio, mimetype="audio/mpeg",
+                            headers={"Content-Length": str(len(audio)),
+                                     "Cache-Control": "no-cache"})
+        else:
+            return jsonify({"error": "TTS generation failed"}), 500
+    except Exception as e:
+        print(f"TTS endpoint error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/health", methods=["GET"])
