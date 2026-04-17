@@ -8,8 +8,6 @@
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#08080d;color:#e0e0e0;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
-
-  /* Header */
   .hdr{padding:.8rem 1.2rem;border-bottom:1px solid #1a1a28;display:flex;align-items:center;justify-content:space-between;background:#0c0c14;flex-shrink:0}
   .hdr h1{font-size:1rem;font-weight:600;color:#fff}
   .hdr .sub{font-size:.65rem;color:#555;margin-top:1px}
@@ -20,8 +18,6 @@
   .sts.listening{color:#4ade80;background:#0d1f0d}
   .sts.thinking{color:#fbbf24;background:#1f1a0d}
   .sts.speaking{color:#818cf8;background:#0d0d1f}
-
-  /* Chat */
   .chat{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.6rem;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
   .m{max-width:85%;padding:.75rem 1rem;border-radius:12px;font-size:.88rem;line-height:1.5;animation:si .25s ease}
   @keyframes si{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
@@ -34,13 +30,9 @@
   .ld span{display:inline-block;width:5px;height:5px;border-radius:50%;background:#818cf8;animation:bn 1.4s infinite;margin-right:3px}
   .ld span:nth-child(2){animation-delay:.2s}.ld span:nth-child(3){animation-delay:.4s}
   @keyframes bn{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}}
-
-  /* Live bar */
   .lv{padding:.5rem 1rem;background:#0a0f0a;border-top:1px solid #1a281a;font-size:.8rem;color:#4ade80;min-height:2rem;display:none;flex-shrink:0}
   .lv.on{display:block}
   .lv .it{color:#2a7a2a}
-
-  /* Controls */
   .ctrl{padding:.8rem 1rem;border-top:1px solid #1a1a28;background:#0c0c14;display:flex;align-items:center;gap:.6rem;flex-shrink:0}
   .mc{width:52px;height:52px;border-radius:50%;border:2px solid #253525;background:#0f1a0f;color:#4ade80;font-size:1.3rem;cursor:pointer;transition:all .2s;flex-shrink:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
   .mc:hover{background:#152015;transform:scale(1.05)}
@@ -55,8 +47,6 @@
   .sb:disabled{opacity:.3;cursor:not-allowed}
   .eb{padding:.65rem .9rem;background:none;border:1px solid #2a2a3a;border-radius:10px;color:#666;cursor:pointer;font-size:.75rem;flex-shrink:0}
   .eb:hover{color:#f87171;border-color:#3a2a2a}
-
-  /* Start screen */
   .ss{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:1.2rem;padding:2rem;text-align:center}
   .ss h1{font-size:1.6rem;color:#fff;font-weight:700}
   .ss .logo{font-size:2.5rem;margin-bottom:.5rem}
@@ -66,10 +56,7 @@
   .go:disabled{opacity:.4;cursor:wait}
   .nt{color:#888;font-size:.75rem;min-height:1.2rem}
   .tip{color:#444;font-size:.65rem;margin-top:.3rem}
-
   .iu{display:none;height:100dvh;flex-direction:column}
-
-  /* Mobile adjustments */
   @media(max-width:600px){
     .hdr h1{font-size:.9rem}
     .m{max-width:92%;font-size:.84rem}
@@ -102,10 +89,8 @@
       <span class="tmr" id="tm">00:00</span>
     </div>
   </div>
-
   <div class="chat" id="chat"></div>
   <div class="lv" id="lv"></div>
-
   <div class="ctrl">
     <button class="mc" id="micB" onclick="micT()" title="Sprechen (Leertaste)">🎤</button>
     <input class="ti" id="ti" placeholder="Oder hier tippen..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();snd()}" />
@@ -116,12 +101,119 @@
 
 <script>
 const API=location.origin;
-let busy=0,active=0,recOn=0,rec=null,sid='';
-let tS=null,tI=null,curAudio=null;
 
+// ── State ──
+let busy=0, active=0, recOn=0, rec=null;
+let tStart=null, tI=null;
+let messages=[]; // Full conversation history, sent with every request
+
+// ── Edge TTS via WebSocket (natural Microsoft voice in browser) ──
+const TTS_VOICE='de-DE-FlorianMultilingualNeural';
+const TTS_WS_URL='wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
+
+function edgeTTS(text){
+  return new Promise((resolve)=>{
+    const clean=text.replace(/[*_#"]/g,'');
+    // Build SSML
+    const rid=crypto.randomUUID().replace(/-/g,'');
+    const ssml=`<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='de-DE'><voice name='${TTS_VOICE}'><prosody rate='-3%' pitch='-2Hz'>${clean}</prosody></voice></speak>`;
+
+    let ws;
+    try{
+      ws=new WebSocket(`${TTS_WS_URL}?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=${rid}`);
+    }catch(e){resolve(null);return}
+
+    ws.binaryType='arraybuffer';
+    const chunks=[];
+    let headerSent=false;
+
+    ws.onopen=()=>{
+      // Send config
+      ws.send(`Content-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}`);
+      // Send SSML
+      ws.send(`X-RequestId:${rid}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n${ssml}`);
+    };
+
+    ws.onmessage=(e)=>{
+      if(e.data instanceof ArrayBuffer){
+        // Binary audio data - skip the header
+        const view=new DataView(e.data);
+        const headerLen=view.getInt16(0);
+        const audioData=e.data.slice(2+headerLen);
+        if(audioData.byteLength>0)chunks.push(audioData);
+      } else if(typeof e.data==='string'){
+        if(e.data.includes('Path:turn.end')){
+          ws.close();
+          if(chunks.length>0){
+            const blob=new Blob(chunks,{type:'audio/mpeg'});
+            resolve(URL.createObjectURL(blob));
+          } else {
+            resolve(null);
+          }
+        }
+      }
+    };
+
+    ws.onerror=()=>{resolve(null)};
+    ws.onclose=()=>{
+      if(chunks.length>0&&!headerSent){
+        headerSent=true;
+        const blob=new Blob(chunks,{type:'audio/mpeg'});
+        resolve(URL.createObjectURL(blob));
+      } else if(chunks.length===0){
+        resolve(null);
+      }
+    };
+
+    // Timeout after 15s
+    setTimeout(()=>{try{ws.close()}catch(e){}resolve(null)},15000);
+  });
+}
+
+let curAudio=null;
+
+async function speak(text){
+  st('speaking','Spricht...');
+
+  // Try Edge TTS first (natural voice)
+  const url=await edgeTTS(text);
+  if(url){
+    return new Promise(r=>{
+      curAudio=new Audio(url);
+      curAudio.onended=()=>{curAudio=null;URL.revokeObjectURL(url);r()};
+      curAudio.onerror=()=>{curAudio=null;r()};
+      curAudio.play().catch(()=>r());
+    });
+  }
+
+  // Fallback: browser SpeechSynthesis
+  return new Promise(r=>{
+    if(!window.speechSynthesis){r();return}
+    const u=new SpeechSynthesisUtterance(text.replace(/[*_#"]/g,''));
+    u.lang='de-DE';u.rate=1.0;u.pitch=0.9;
+    const voices=window.speechSynthesis.getVoices();
+    const v=voices.find(v=>v.lang.startsWith('de')&&v.localService)||voices.find(v=>v.lang.startsWith('de'));
+    if(v)u.voice=v;
+    u.onend=r;u.onerror=r;
+    window.speechSynthesis.speak(u);
+  });
+}
+
+function stopAudio(){
+  if(curAudio){try{curAudio.pause();curAudio=null}catch(e){}}
+  if(window.speechSynthesis)window.speechSynthesis.cancel();
+}
+
+// ── UI Helpers ──
 function st(c,t){const e=document.getElementById('st');e.className='sts '+c;e.textContent=t}
 
-function startT(){tS=Date.now();tI=setInterval(()=>{const s=Math.floor((Date.now()-tS)/1000);document.getElementById('tm').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},1000)}
+function startTimer(){
+  tStart=Date.now();
+  tI=setInterval(()=>{
+    const s=Math.floor((Date.now()-tStart)/1000);
+    document.getElementById('tm').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
+  },1000);
+}
 
 function addM(r,t){
   const ch=document.getElementById('chat'),d=document.createElement('div');
@@ -137,22 +229,7 @@ function addL(){
 }
 function rmL(){const e=document.getElementById('ld');if(e)e.remove()}
 
-function playA(b){
-  return new Promise(r=>{
-    if(!b){r();return}
-    try{
-      const a=atob(b),u=new Uint8Array(a.length);
-      for(let i=0;i<a.length;i++)u[i]=a.charCodeAt(i);
-      const bl=new Blob([u],{type:'audio/mpeg'}),url=URL.createObjectURL(bl);
-      curAudio=new Audio(url);
-      curAudio.onended=()=>{curAudio=null;URL.revokeObjectURL(url);r()};
-      curAudio.onerror=()=>{curAudio=null;r()};
-      curAudio.play().catch(()=>r());
-    }catch(e){r()}
-  });
-}
-function stopA(){if(curAudio){try{curAudio.pause();curAudio=null}catch(e){}}}
-
+// ── Speech Recognition ──
 function initR(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR)return null;
@@ -180,7 +257,7 @@ function initR(){
 
 function micT(){if(busy)return;recOn?finR():startR()}
 function startR(){
-  if(busy)return;stopA();
+  if(busy)return;stopAudio();
   if(!rec)rec=initR();
   if(!rec){addM('s','Spracherkennung nicht verfügbar. Chrome/Edge verwenden.');return}
   rec._rf();recOn=1;
@@ -206,48 +283,97 @@ function snd(){
   if(!t||busy)return;inp.value='';handleIn(t);
 }
 
+// ── Core: Send message to server ──
 async function handleIn(t){
   if(busy||!active)return;
   busy=1;document.getElementById('sB').disabled=true;document.getElementById('micB').disabled=true;
-  addM('c',t);addL();st('thinking','Denkt nach...');
+
+  addM('c',t);
+  messages.push({role:'user',content:t});
+
+  addL();st('thinking','Denkt nach...');
+
   try{
-    const r=await fetch(API+'/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,session_id:sid})});
-    const d=await r.json();rmL();
+    const r=await fetch(API+'/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:messages})
+    });
+    const d=await r.json();
+    rmL();
+
     if(d.error){addM('s','Fehler: '+d.error)}
-    else if(d.reply){addM('i',d.reply);st('speaking','Spricht...');await playA(d.audio)}
+    else if(d.reply){
+      messages.push({role:'assistant',content:d.reply});
+      addM('i',d.reply);
+      await speak(d.reply);
+    }
   }catch(e){rmL();addM('s','Verbindungsfehler: '+e.message)}
+
   st('idle','Bereit');busy=0;
   document.getElementById('sB').disabled=false;document.getElementById('micB').disabled=false;
 }
 
+// ── Start Interview ──
 async function go(){
   const b=document.getElementById('goBtn'),n=document.getElementById('goN');
   b.disabled=true;n.textContent='Verbinde mit Dr. Keller...';
+
+  // Pre-load voices
+  if(window.speechSynthesis)window.speechSynthesis.getVoices();
+
+  messages=[{role:'user',content:'Bitte stellen Sie sich kurz vor und präsentieren Sie den Case. Maximal 4 bis 5 Sätze, gesprochen, direkt.'}];
+
   try{
-    const r=await fetch(API+'/api/start',{method:'POST'});
+    const r=await fetch(API+'/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:messages})
+    });
     const d=await r.json();
     if(d.error)throw new Error(d.error);
     if(!d.reply)throw new Error('Keine Antwort');
-    sid=d.session_id;
+
+    messages.push({role:'assistant',content:d.reply});
+
     document.getElementById('S').style.display='none';
     document.getElementById('I').style.display='flex';
-    active=1;startT();
-    addM('i',d.reply);st('speaking','Spricht...');await playA(d.audio);st('idle','Bereit');
+    active=1;startTimer();
+
+    addM('i',d.reply);
+    await speak(d.reply);
+    st('idle','Bereit');
   }catch(e){n.textContent='Fehler: '+e.message;b.disabled=false}
 }
 
+// ── End Interview ──
 async function fin(){
-  if(!active||busy)return;active=0;busy=1;stopR();stopA();
+  if(!active||busy)return;active=0;busy=1;stopR();stopAudio();
   addM('s','Interview wird beendet — Debrief...');addL();st('thinking','Debrief...');
+
+  messages.push({role:'user',content:'Das Interview ist zu Ende. Gib jetzt das strukturierte Feedback auf Deutsch. Bewerte Structure, Analysis, Quantitative Performance, Communication jeweils 1 bis 5. Gib eine Overall Recommendation: PASS, BORDERLINE, oder FAIL. Beschreibe wie ein Top 10 Prozent Kandidat den Case angegangen wäre. Schreib es als gesprochenen Text ohne Sonderzeichen.'});
+
   try{
-    const r=await fetch(API+'/api/end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sid})});
+    const r=await fetch(API+'/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({messages:messages})
+    });
     const d=await r.json();rmL();
-    if(d.reply){addM('i',d.reply);st('speaking','Debrief');await playA(d.audio)}
+    if(d.reply){
+      messages.push({role:'assistant',content:d.reply});
+      addM('i',d.reply);
+      await speak(d.reply);
+    }
   }catch(e){rmL();addM('s','Debrief fehlgeschlagen.')}
+
   clearInterval(tI);st('idle','Fertig');busy=0;
 }
 
+// Spacebar shortcut
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();micT()}});
+// Pre-load voices
+if(window.speechSynthesis){window.speechSynthesis.getVoices();window.speechSynthesis.onvoiceschanged=()=>window.speechSynthesis.getVoices()}
 </script>
 </body>
 </html>

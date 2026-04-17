@@ -1,26 +1,19 @@
 """
-Stern Stewart Case Interview — Production Server
-Uses Groq API (free) + edge-tts (Microsoft Neural voices).
+Stern Stewart Case Interview — Production Server (Vercel Serverless)
+Uses Groq API (free) for AI. TTS handled client-side.
+Stateless: client sends full conversation history each request.
 """
 
 import os
 import json
-import asyncio
-import tempfile
-import base64
-import uuid
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from openai import OpenAI
-import edge_tts
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
-VOICE = "de-DE-FlorianMultilingualNeural"
 MODEL = "llama-3.3-70b-versatile"
-
-sessions = {}
 
 SYSTEM_PROMPT = """You are Dr. Keller, Partner at Stern Stewart & Co. You are conducting a live case interview.
 
@@ -82,35 +75,6 @@ def call_llm(messages):
     return response.choices[0].message.content
 
 
-def generate_audio(text):
-    clean = text.replace('"', '').replace("'", "").replace("*", "").replace("#", "").replace("_", "")
-
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        mp3_path = tmp.name
-
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        async def _gen():
-            communicate = edge_tts.Communicate(clean, voice=VOICE, rate="-3%", pitch="-2Hz")
-            await communicate.save(mp3_path)
-
-        loop.run_until_complete(_gen())
-        loop.close()
-
-        with open(mp3_path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except Exception as e:
-        print(f"TTS error: {e}")
-        return None
-    finally:
-        try:
-            os.unlink(mp3_path)
-        except:
-            pass
-
-
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -121,63 +85,27 @@ def static_files(path):
     return send_from_directory("static", path)
 
 
-@app.route("/api/start", methods=["POST"])
-def start():
-    session_id = str(uuid.uuid4())
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    """
+    Stateless chat endpoint.
+    Client sends full message history, server returns next assistant message.
+    """
+    try:
+        data = request.json
+        messages = data.get("messages", [])
 
-    messages = [
-        {"role": "user", "content": "Bitte stellen Sie sich kurz vor und präsentieren Sie den Case. Maximal 4 bis 5 Sätze, gesprochen, direkt."}
-    ]
+        if not messages:
+            return jsonify({"error": "No messages provided"}), 400
 
-    reply = call_llm(messages)
-    messages.append({"role": "assistant", "content": reply})
-    sessions[session_id] = messages
+        reply = call_llm(messages)
+        return jsonify({"reply": reply})
 
-    audio = generate_audio(reply)
-    return jsonify({"reply": reply, "audio": audio, "session_id": session_id})
-
-
-@app.route("/api/message", methods=["POST"])
-def message():
-    data = request.json
-    text = data.get("text", "").strip()
-    session_id = data.get("session_id", "")
-
-    if not text:
-        return jsonify({"error": "No text"}), 400
-
-    messages = sessions.get(session_id, [])
-    messages.append({"role": "user", "content": text})
-
-    reply = call_llm(messages)
-    messages.append({"role": "assistant", "content": reply})
-    sessions[session_id] = messages
-
-    audio = generate_audio(reply)
-    return jsonify({"reply": reply, "audio": audio})
-
-
-@app.route("/api/end", methods=["POST"])
-def end():
-    data = request.json
-    session_id = data.get("session_id", "")
-
-    messages = sessions.get(session_id, [])
-    messages.append({
-        "role": "user",
-        "content": "Das Interview ist zu Ende. Gib jetzt das strukturierte Feedback auf Deutsch. Bewerte Structure, Analysis, Quantitative Performance, Communication jeweils 1 bis 5. Gib eine Overall Recommendation: PASS, BORDERLINE, oder FAIL. Beschreibe wie ein Top 10 Prozent Kandidat den Case angegangen wäre. Schreib es als gesprochenen Text ohne Sonderzeichen."
-    })
-
-    reply = call_llm(messages)
-    messages.append({"role": "assistant", "content": reply})
-    sessions[session_id] = messages
-
-    audio = generate_audio(reply)
-
-    if session_id in sessions:
-        del sessions[session_id]
-
-    return jsonify({"reply": reply, "audio": audio})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"error": "Server error. Please try again."}), 500
 
 
 @app.route("/api/health", methods=["GET"])
