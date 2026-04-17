@@ -1,6 +1,6 @@
 """
 Stern Stewart Case Interview — Production Server
-Uses Anthropic API + edge-tts (Microsoft Neural voices).
+Uses Groq API (free) + edge-tts (Microsoft Neural voices).
 """
 
 import os
@@ -8,18 +8,18 @@ import json
 import asyncio
 import tempfile
 import base64
+import uuid
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import anthropic
+from openai import OpenAI
 import edge_tts
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
 VOICE = "de-DE-FlorianMultilingualNeural"
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "llama-3.3-70b-versatile"
 
-# In-memory session storage (keyed by session_id)
 sessions = {}
 
 SYSTEM_PROMPT = """You are Dr. Keller, Partner at Stern Stewart & Co. You are conducting a live case interview.
@@ -64,21 +64,22 @@ IMPORTANT: Write numbers as words or with digits, never use special symbols. Wri
 
 
 def get_client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set")
-    return anthropic.Anthropic(api_key=api_key)
+        raise ValueError("GROQ_API_KEY not set")
+    return OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
 
 
-def call_claude(messages):
+def call_llm(messages):
     client = get_client()
-    response = client.messages.create(
+    chat_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+    response = client.chat.completions.create(
         model=MODEL,
+        messages=chat_messages,
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=messages,
+        temperature=0.7,
     )
-    return response.content[0].text
+    return response.choices[0].message.content
 
 
 def generate_audio(text):
@@ -110,8 +111,6 @@ def generate_audio(text):
             pass
 
 
-# ── Routes ──
-
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
@@ -124,14 +123,13 @@ def static_files(path):
 
 @app.route("/api/start", methods=["POST"])
 def start():
-    import uuid
     session_id = str(uuid.uuid4())
 
     messages = [
         {"role": "user", "content": "Bitte stellen Sie sich kurz vor und präsentieren Sie den Case. Maximal 4 bis 5 Sätze, gesprochen, direkt."}
     ]
 
-    reply = call_claude(messages)
+    reply = call_llm(messages)
     messages.append({"role": "assistant", "content": reply})
     sessions[session_id] = messages
 
@@ -151,7 +149,7 @@ def message():
     messages = sessions.get(session_id, [])
     messages.append({"role": "user", "content": text})
 
-    reply = call_claude(messages)
+    reply = call_llm(messages)
     messages.append({"role": "assistant", "content": reply})
     sessions[session_id] = messages
 
@@ -170,13 +168,12 @@ def end():
         "content": "Das Interview ist zu Ende. Gib jetzt das strukturierte Feedback auf Deutsch. Bewerte Structure, Analysis, Quantitative Performance, Communication jeweils 1 bis 5. Gib eine Overall Recommendation: PASS, BORDERLINE, oder FAIL. Beschreibe wie ein Top 10 Prozent Kandidat den Case angegangen wäre. Schreib es als gesprochenen Text ohne Sonderzeichen."
     })
 
-    reply = call_claude(messages)
+    reply = call_llm(messages)
     messages.append({"role": "assistant", "content": reply})
     sessions[session_id] = messages
 
     audio = generate_audio(reply)
 
-    # Clean up session
     if session_id in sessions:
         del sessions[session_id]
 
@@ -185,7 +182,7 @@ def end():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    has_key = bool(os.environ.get("GROQ_API_KEY"))
     return jsonify({"status": "ok", "api_key_configured": has_key})
 
 
