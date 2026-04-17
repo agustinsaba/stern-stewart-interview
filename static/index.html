@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Case Interview — Stern Stewart & Co.</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💼</text></svg>">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#08080d;color:#e0e0e0;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+
+  /* Header */
+  .hdr{padding:.8rem 1.2rem;border-bottom:1px solid #1a1a28;display:flex;align-items:center;justify-content:space-between;background:#0c0c14;flex-shrink:0}
+  .hdr h1{font-size:1rem;font-weight:600;color:#fff}
+  .hdr .sub{font-size:.65rem;color:#555;margin-top:1px}
+  .hr{display:flex;align-items:center;gap:.8rem}
+  .tmr{font-family:'SF Mono','Menlo',monospace;color:#888;font-size:.85rem}
+  .sts{font-size:.7rem;padding:.2rem .55rem;border-radius:12px;font-weight:600}
+  .sts.idle{color:#555;background:#111}
+  .sts.listening{color:#4ade80;background:#0d1f0d}
+  .sts.thinking{color:#fbbf24;background:#1f1a0d}
+  .sts.speaking{color:#818cf8;background:#0d0d1f}
+
+  /* Chat */
+  .chat{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.6rem;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
+  .m{max-width:85%;padding:.75rem 1rem;border-radius:12px;font-size:.88rem;line-height:1.5;animation:si .25s ease}
+  @keyframes si{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+  .m.i{align-self:flex-start;background:#151528;border:1px solid #252545;color:#c8c8e0}
+  .m.c{align-self:flex-end;background:#152015;border:1px solid #253525;color:#b8d8b8}
+  .m.s{align-self:center;background:none;color:#555;font-size:.75rem;font-style:italic}
+  .lb{font-size:.6rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.25rem;font-weight:600}
+  .m.i .lb{color:#818cf8}
+  .m.c .lb{color:#4ade80}
+  .ld span{display:inline-block;width:5px;height:5px;border-radius:50%;background:#818cf8;animation:bn 1.4s infinite;margin-right:3px}
+  .ld span:nth-child(2){animation-delay:.2s}.ld span:nth-child(3){animation-delay:.4s}
+  @keyframes bn{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}}
+
+  /* Live bar */
+  .lv{padding:.5rem 1rem;background:#0a0f0a;border-top:1px solid #1a281a;font-size:.8rem;color:#4ade80;min-height:2rem;display:none;flex-shrink:0}
+  .lv.on{display:block}
+  .lv .it{color:#2a7a2a}
+
+  /* Controls */
+  .ctrl{padding:.8rem 1rem;border-top:1px solid #1a1a28;background:#0c0c14;display:flex;align-items:center;gap:.6rem;flex-shrink:0}
+  .mc{width:52px;height:52px;border-radius:50%;border:2px solid #253525;background:#0f1a0f;color:#4ade80;font-size:1.3rem;cursor:pointer;transition:all .2s;flex-shrink:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
+  .mc:hover{background:#152015;transform:scale(1.05)}
+  .mc.rec{border-color:#4a2020;background:#1f0f0f;color:#f87171;animation:gl 1.5s infinite}
+  .mc:disabled{opacity:.3;cursor:not-allowed;animation:none}
+  @keyframes gl{0%,100%{box-shadow:0 0 0 0 #f8717133}50%{box-shadow:0 0 0 12px #f8717100}}
+  .ti{flex:1;padding:.65rem .8rem;background:#141420;border:1px solid #252535;border-radius:10px;color:#fff;font-size:.85rem;outline:none;min-width:0}
+  .ti:focus{border-color:#4a5aef}
+  .ti::placeholder{color:#444}
+  .sb{padding:.65rem .9rem;background:#4a5aef;border:none;border-radius:10px;color:#fff;font-weight:600;cursor:pointer;font-size:.8rem;flex-shrink:0}
+  .sb:hover{opacity:.85}
+  .sb:disabled{opacity:.3;cursor:not-allowed}
+  .eb{padding:.65rem .9rem;background:none;border:1px solid #2a2a3a;border-radius:10px;color:#666;cursor:pointer;font-size:.75rem;flex-shrink:0}
+  .eb:hover{color:#f87171;border-color:#3a2a2a}
+
+  /* Start screen */
+  .ss{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:1.2rem;padding:2rem;text-align:center}
+  .ss h1{font-size:1.6rem;color:#fff;font-weight:700}
+  .ss .logo{font-size:2.5rem;margin-bottom:.5rem}
+  .ss p{color:#777;font-size:.85rem;max-width:380px;line-height:1.5}
+  .go{padding:.9rem 2.2rem;background:linear-gradient(135deg,#4a5aef,#7b5cff);border:none;border-radius:12px;color:#fff;font-size:1rem;font-weight:600;cursor:pointer;transition:transform .2s;-webkit-tap-highlight-color:transparent}
+  .go:hover{transform:scale(1.03)}
+  .go:disabled{opacity:.4;cursor:wait}
+  .nt{color:#888;font-size:.75rem;min-height:1.2rem}
+  .tip{color:#444;font-size:.65rem;margin-top:.3rem}
+
+  .iu{display:none;height:100dvh;flex-direction:column}
+
+  /* Mobile adjustments */
+  @media(max-width:600px){
+    .hdr h1{font-size:.9rem}
+    .m{max-width:92%;font-size:.84rem}
+    .ctrl{padding:.6rem .8rem;gap:.5rem}
+    .mc{width:46px;height:46px;font-size:1.1rem}
+    .ti{padding:.55rem .7rem;font-size:.8rem}
+  }
+</style>
+</head>
+<body>
+
+<div class="ss" id="S">
+  <div class="logo">💼</div>
+  <h1>Stern Stewart & Co.</h1>
+  <p>Case Interview Simulator<br>Dr. Keller, Partner</p>
+  <p style="color:#555;font-size:.78rem">Sprechen Sie auf Deutsch. Daten auch auf Englisch.<br>Druck: mittel bis hoch.</p>
+  <button class="go" id="goBtn" onclick="go()">Interview starten</button>
+  <p class="nt" id="goN"></p>
+  <p class="tip">Chrome oder Edge empfohlen</p>
+</div>
+
+<div class="iu" id="I">
+  <div class="hdr">
+    <div>
+      <h1>Dr. Keller — Stern Stewart</h1>
+      <div class="sub">Case Interview</div>
+    </div>
+    <div class="hr">
+      <span class="sts idle" id="st">Bereit</span>
+      <span class="tmr" id="tm">00:00</span>
+    </div>
+  </div>
+
+  <div class="chat" id="chat"></div>
+  <div class="lv" id="lv"></div>
+
+  <div class="ctrl">
+    <button class="mc" id="micB" onclick="micT()" title="Sprechen (Leertaste)">🎤</button>
+    <input class="ti" id="ti" placeholder="Oder hier tippen..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();snd()}" />
+    <button class="sb" id="sB" onclick="snd()">Senden</button>
+    <button class="eb" onclick="fin()">Beenden</button>
+  </div>
+</div>
+
+<script>
+const API=location.origin;
+let busy=0,active=0,recOn=0,rec=null,sid='';
+let tS=null,tI=null,curAudio=null;
+
+function st(c,t){const e=document.getElementById('st');e.className='sts '+c;e.textContent=t}
+
+function startT(){tS=Date.now();tI=setInterval(()=>{const s=Math.floor((Date.now()-tS)/1000);document.getElementById('tm').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},1000)}
+
+function addM(r,t){
+  const ch=document.getElementById('chat'),d=document.createElement('div');
+  if(r==='s'){d.className='m s';d.textContent=t}
+  else{d.className='m '+(r==='i'?'i':'c');d.innerHTML='<div class="lb">'+(r==='i'?'DR. KELLER':'SIE')+'</div>'+t.replace(/\n/g,'<br>')}
+  ch.appendChild(d);ch.scrollTop=ch.scrollHeight;
+}
+function addL(){
+  const ch=document.getElementById('chat'),d=document.createElement('div');
+  d.className='m i';d.id='ld';
+  d.innerHTML='<div class="lb">DR. KELLER</div><div class="ld"><span></span><span></span><span></span></div>';
+  ch.appendChild(d);ch.scrollTop=ch.scrollHeight;
+}
+function rmL(){const e=document.getElementById('ld');if(e)e.remove()}
+
+function playA(b){
+  return new Promise(r=>{
+    if(!b){r();return}
+    try{
+      const a=atob(b),u=new Uint8Array(a.length);
+      for(let i=0;i<a.length;i++)u[i]=a.charCodeAt(i);
+      const bl=new Blob([u],{type:'audio/mpeg'}),url=URL.createObjectURL(bl);
+      curAudio=new Audio(url);
+      curAudio.onended=()=>{curAudio=null;URL.revokeObjectURL(url);r()};
+      curAudio.onerror=()=>{curAudio=null;r()};
+      curAudio.play().catch(()=>r());
+    }catch(e){r()}
+  });
+}
+function stopA(){if(curAudio){try{curAudio.pause();curAudio=null}catch(e){}}}
+
+function initR(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return null;
+  const r=new SR();
+  r.lang='de-DE';r.continuous=false;r.interimResults=true;r.maxAlternatives=1;
+  let fT='',rc=0;
+  r.onresult=e=>{
+    let it='';fT='';
+    for(let i=0;i<e.results.length;i++){
+      if(e.results[i].isFinal)fT+=e.results[i][0].transcript+' ';
+      else it+=e.results[i][0].transcript;
+    }
+    const lv=document.getElementById('lv');
+    lv.innerHTML=fT+(it?'<span class="it">'+it+'</span>':'');
+    lv.scrollTop=lv.scrollHeight;
+  };
+  r.onend=()=>{if(recOn){rc++;if(rc<20)try{r.start()}catch(e){}else finR()}};
+  r.onerror=e=>{
+    if(e.error==='no-speech'&&recOn)try{r.start()}catch(ex){}
+    else if(e.error==='not-allowed'){addM('s','Mikrofon-Zugriff verweigert.');stopR()}
+  };
+  r._rf=()=>{fT='';rc=0};r._gf=()=>fT;
+  return r;
+}
+
+function micT(){if(busy)return;recOn?finR():startR()}
+function startR(){
+  if(busy)return;stopA();
+  if(!rec)rec=initR();
+  if(!rec){addM('s','Spracherkennung nicht verfügbar. Chrome/Edge verwenden.');return}
+  rec._rf();recOn=1;
+  const b=document.getElementById('micB');b.classList.add('rec');b.textContent='⏹';
+  st('listening','Hört zu...');
+  document.getElementById('lv').classList.add('on');
+  document.getElementById('lv').textContent='';
+  try{rec.start()}catch(e){try{rec.stop()}catch(x){}setTimeout(()=>{try{rec.start()}catch(x){}},100)}
+}
+function stopR(){
+  recOn=0;const b=document.getElementById('micB');b.classList.remove('rec');b.textContent='🎤';
+  document.getElementById('lv').classList.remove('on');
+  if(rec)try{rec.stop()}catch(e){}
+}
+function finR(){
+  if(!recOn)return;
+  const t=(rec?rec._gf():'').trim();
+  stopR();if(t.length>2)handleIn(t);
+}
+
+function snd(){
+  const inp=document.getElementById('ti'),t=inp.value.trim();
+  if(!t||busy)return;inp.value='';handleIn(t);
+}
+
+async function handleIn(t){
+  if(busy||!active)return;
+  busy=1;document.getElementById('sB').disabled=true;document.getElementById('micB').disabled=true;
+  addM('c',t);addL();st('thinking','Denkt nach...');
+  try{
+    const r=await fetch(API+'/api/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,session_id:sid})});
+    const d=await r.json();rmL();
+    if(d.error){addM('s','Fehler: '+d.error)}
+    else if(d.reply){addM('i',d.reply);st('speaking','Spricht...');await playA(d.audio)}
+  }catch(e){rmL();addM('s','Verbindungsfehler: '+e.message)}
+  st('idle','Bereit');busy=0;
+  document.getElementById('sB').disabled=false;document.getElementById('micB').disabled=false;
+}
+
+async function go(){
+  const b=document.getElementById('goBtn'),n=document.getElementById('goN');
+  b.disabled=true;n.textContent='Verbinde mit Dr. Keller...';
+  try{
+    const r=await fetch(API+'/api/start',{method:'POST'});
+    const d=await r.json();
+    if(d.error)throw new Error(d.error);
+    if(!d.reply)throw new Error('Keine Antwort');
+    sid=d.session_id;
+    document.getElementById('S').style.display='none';
+    document.getElementById('I').style.display='flex';
+    active=1;startT();
+    addM('i',d.reply);st('speaking','Spricht...');await playA(d.audio);st('idle','Bereit');
+  }catch(e){n.textContent='Fehler: '+e.message;b.disabled=false}
+}
+
+async function fin(){
+  if(!active||busy)return;active=0;busy=1;stopR();stopA();
+  addM('s','Interview wird beendet — Debrief...');addL();st('thinking','Debrief...');
+  try{
+    const r=await fetch(API+'/api/end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:sid})});
+    const d=await r.json();rmL();
+    if(d.reply){addM('i',d.reply);st('speaking','Debrief');await playA(d.audio)}
+  }catch(e){rmL();addM('s','Debrief fehlgeschlagen.')}
+  clearInterval(tI);st('idle','Fertig');busy=0;
+}
+
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();micT()}});
+</script>
+</body>
+</html>
