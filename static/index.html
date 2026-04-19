@@ -18,6 +18,7 @@
   .sts.listening{color:#4ade80;background:#0d1f0d}
   .sts.thinking{color:#fbbf24;background:#1f1a0d}
   .sts.speaking{color:#818cf8;background:#0d0d1f}
+  .sts.transcribing{color:#f0abfc;background:#1f0d1f}
   .chat{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.6rem;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
   .m{max-width:85%;padding:.75rem 1rem;border-radius:12px;font-size:.88rem;line-height:1.5;animation:si .25s ease;word-wrap:break-word}
   @keyframes si{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
@@ -30,8 +31,12 @@
   .ld span{display:inline-block;width:5px;height:5px;border-radius:50%;background:#818cf8;animation:bn 1.4s infinite;margin-right:3px}
   .ld span:nth-child(2){animation-delay:.2s}.ld span:nth-child(3){animation-delay:.4s}
   @keyframes bn{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}}
-  .lv{padding:.5rem 1rem;background:#0a0f0a;border-top:1px solid #1a281a;font-size:.82rem;color:#4ade80;min-height:2.5rem;display:none;flex-shrink:0;max-height:80px;overflow-y:auto}
-  .lv.on{display:block}
+
+  .rec-bar{padding:.6rem 1rem;background:#1a0f0f;border-top:1px solid #2a1a1a;font-size:.82rem;color:#f87171;min-height:2.5rem;display:none;flex-shrink:0;text-align:center}
+  .rec-bar.on{display:flex;align-items:center;justify-content:center;gap:.5rem}
+  .rec-dot{width:8px;height:8px;border-radius:50%;background:#f87171;animation:blink 1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
   .ctrl{padding:.8rem 1rem;border-top:1px solid #1a1a28;background:#0c0c14;display:flex;align-items:center;gap:.6rem;flex-shrink:0}
   .mc{width:56px;height:56px;border-radius:50%;border:2px solid #253525;background:#0f1a0f;color:#4ade80;font-size:1.4rem;cursor:pointer;transition:all .2s;flex-shrink:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
   .mc:hover{background:#152015;transform:scale(1.05)}
@@ -67,7 +72,6 @@
   <p style="color:#555;font-size:.78rem">Sprechen Sie auf Deutsch. Daten auch auf Englisch.<br>Druck: mittel bis hoch. Jede Session ein neuer Case.</p>
   <button class="go" id="goBtn" onclick="go()">Interview starten</button>
   <p class="nt" id="goN"></p>
-  <p style="color:#444;font-size:.65rem;margin-top:.3rem">Chrome oder Edge empfohlen</p>
 </div>
 
 <div class="iu" id="I">
@@ -79,9 +83,9 @@
     </div>
   </div>
   <div class="chat" id="chat"></div>
-  <div class="lv" id="lv"></div>
+  <div class="rec-bar" id="recBar"><span class="rec-dot"></span> Aufnahme laeuft... Druecken Sie erneut zum Senden</div>
   <div class="ctrl">
-    <button class="mc" id="micB" onclick="micToggle()" title="Sprechen">🎤</button>
+    <button class="mc" id="micB" onclick="micToggle()">🎤</button>
     <input class="ti" id="ti" placeholder="Oder hier tippen..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendText()}" />
     <button class="sb" id="sB" onclick="sendText()">Senden</button>
     <button class="eb" onclick="endInterview()">Beenden</button>
@@ -94,7 +98,7 @@ let busy = false, active = false, messages = [], caseId = null;
 let curAudio = null;
 
 // ═══════════════════════════════════════
-// TTS — server-side Groq Orpheus (natural voice)
+// TTS — Groq Orpheus (server-side)
 // ═══════════════════════════════════════
 async function speak(text) {
   setSt('speaking', 'Spricht...');
@@ -104,9 +108,9 @@ async function speak(text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })
     });
-    if (!resp.ok) throw new Error('TTS ' + resp.status);
+    if (!resp.ok) return;
     const blob = await resp.blob();
-    if (blob.size < 200) throw new Error('Audio too small');
+    if (blob.size < 200) return;
     const url = URL.createObjectURL(blob);
     return new Promise(resolve => {
       curAudio = new Audio(url);
@@ -114,98 +118,104 @@ async function speak(text) {
       curAudio.onerror = () => { curAudio = null; URL.revokeObjectURL(url); resolve(); };
       curAudio.play().catch(() => resolve());
     });
-  } catch (e) {
-    console.warn('TTS failed:', e);
-    // Silent fallback — don't block the interview
-  }
+  } catch (e) { console.warn('TTS:', e); }
 }
 
 function stopAudio() {
-  if (curAudio) { try { curAudio.pause(); curAudio.currentTime = 0; } catch(e) {} curAudio = null; }
+  if (curAudio) { try { curAudio.pause(); } catch(e) {} curAudio = null; }
 }
 
 // ═══════════════════════════════════════
-// SPEECH RECOGNITION
+// STT — Real mic recording + Groq Whisper
+// Uses MediaRecorder API (works everywhere)
 // ═══════════════════════════════════════
-let recognition = null, isRecording = false, transcript = '', silenceTimeout = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let micStream = null;
+let isRecording = false;
 
-function createRecognition() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return null;
-  const r = new SR();
-  r.lang = 'de-DE';
-  r.continuous = true;
-  r.interimResults = true;
-  r.maxAlternatives = 1;
+async function startRecording() {
+  if (busy) return;
+  stopAudio(); // Stop Dr. Keller if speaking
 
-  r.onresult = (event) => {
-    let finalText = '', interimText = '';
-    for (let i = 0; i < event.results.length; i++) {
-      if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
-      else interimText += event.results[i][0].transcript;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    addMsg('s', 'Mikrofon-Zugriff verweigert. Bitte erlauben.');
+    return;
+  }
+
+  audioChunks = [];
+  mediaRecorder = new MediaRecorder(micStream, { mimeType: getSupportedMime() });
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    // Stop mic stream
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+
+    if (audioChunks.length === 0) return;
+
+    const audioBlob = new Blob(audioChunks, { type: getSupportedMime() });
+    if (audioBlob.size < 1000) {
+      addMsg('s', 'Aufnahme zu kurz. Bitte erneut versuchen.');
+      return;
     }
-    transcript = finalText;
-    document.getElementById('lv').textContent = finalText + (interimText ? ' ' + interimText + '...' : '');
 
-    clearTimeout(silenceTimeout);
-    if (finalText.trim().length > 0) {
-      silenceTimeout = setTimeout(() => {
-        if (isRecording && transcript.trim().length > 2) stopRecording(true);
-      }, 3000);
+    // Transcribe via server
+    setSt('transcribing', 'Transkribiert...');
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'recording.webm');
+      const resp = await fetch(API + '/api/stt', { method: 'POST', body: formData });
+      const data = await resp.json();
+
+      if (data.text && data.text.trim().length > 0) {
+        handleInput(data.text.trim());
+      } else {
+        addMsg('s', 'Keine Sprache erkannt. Bitte erneut versuchen.');
+        setSt('idle', 'Bereit');
+      }
+    } catch (e) {
+      addMsg('s', 'Transkription fehlgeschlagen: ' + e.message);
+      setSt('idle', 'Bereit');
     }
   };
 
-  r.onerror = (event) => {
-    console.log('Rec error:', event.error);
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      addMsg('s', 'Mikrofon verweigert. Bitte in Browser-Einstellungen erlauben.');
-      stopRecording(false);
-    } else if (event.error === 'no-speech') {
-      if (isRecording) try { r.start(); } catch(e) {}
-    }
-  };
+  mediaRecorder.start();
+  isRecording = true;
+  document.getElementById('micB').classList.add('rec');
+  document.getElementById('micB').textContent = '⏹';
+  document.getElementById('recBar').classList.add('on');
+  setSt('listening', 'Aufnahme...');
+}
 
-  r.onend = () => {
-    if (isRecording) try { r.start(); } catch(e) {}
-  };
-
-  return r;
+function stopRecording() {
+  if (!isRecording || !mediaRecorder) return;
+  isRecording = false;
+  document.getElementById('micB').classList.remove('rec');
+  document.getElementById('micB').textContent = '🎤';
+  document.getElementById('recBar').classList.remove('on');
+  mediaRecorder.stop();
 }
 
 function micToggle() {
   if (busy) return;
-  isRecording ? stopRecording(true) : startRecording();
-}
-
-function startRecording() {
-  if (busy) return;
-  stopAudio();
-  if (!recognition) recognition = createRecognition();
-  if (!recognition) { addMsg('s', 'Spracherkennung nicht verfuegbar. Chrome oder Edge verwenden.'); return; }
-  transcript = '';
-  isRecording = true;
-  clearTimeout(silenceTimeout);
-  document.getElementById('micB').classList.add('rec');
-  document.getElementById('micB').textContent = '⏹';
-  setSt('listening', 'Hoert zu...');
-  document.getElementById('lv').classList.add('on');
-  document.getElementById('lv').textContent = 'Sprechen Sie jetzt...';
-  try { recognition.start(); } catch(e) {
-    try { recognition.stop(); } catch(x) {}
-    setTimeout(() => { try { recognition.start(); } catch(x) { stopRecording(false); } }, 200);
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
   }
 }
 
-function stopRecording(shouldSend) {
-  isRecording = false;
-  clearTimeout(silenceTimeout);
-  document.getElementById('micB').classList.remove('rec');
-  document.getElementById('micB').textContent = '🎤';
-  document.getElementById('lv').classList.remove('on');
-  if (recognition) try { recognition.stop(); } catch(e) {}
-  if (shouldSend && transcript.trim().length > 2) handleInput(transcript.trim());
-  transcript = '';
-  if (!busy) setSt('idle', 'Bereit');
+function getSupportedMime() {
+  const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/wav'];
+  for (const t of types) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return 'audio/webm';
 }
 
 // ═══════════════════════════════════════
@@ -283,10 +293,10 @@ async function go() {
 
   // Request mic permission early
   try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); }
-  catch(e) { console.log('Mic not granted yet'); }
+  catch(e) { note.textContent = 'Bitte Mikrofon-Zugriff erlauben.'; btn.disabled = false; return; }
 
   messages = [{ role: 'user', content: 'Bitte stellen Sie sich kurz vor und praesentieren Sie den Case. Maximal 4 bis 5 Saetze, gesprochen, direkt.' }];
-  caseId = null; // Server picks random case
+  caseId = null;
 
   try {
     const resp = await fetch(API + '/api/chat', {
@@ -314,7 +324,9 @@ async function go() {
 // ═══════════════════════════════════════
 async function endInterview() {
   if (!active || busy) return;
-  active = false; busy = true; stopRecording(false); stopAudio();
+  active = false; busy = true;
+  if (isRecording) stopRecording();
+  stopAudio();
   addMsg('s', 'Interview wird beendet...'); addLoading(); setSt('thinking', 'Debrief...');
 
   messages.push({ role: 'user', content: 'Das Interview ist zu Ende. Gib jetzt das strukturierte Feedback auf Deutsch. Bewerte Structure, Analysis, Quantitative Performance, Communication jeweils 1 bis 5. Gib eine Overall Recommendation: PASS, BORDERLINE, oder FAIL. Beschreibe wie ein Top 10 Prozent Kandidat den Case angegangen waere. Schreib es als gesprochenen Text ohne Sonderzeichen.' });

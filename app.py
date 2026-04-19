@@ -1,13 +1,15 @@
 """
 Stern Stewart Case Interview — Production Server
-Groq API (free) for AI + Groq Orpheus TTS (free, natural voice).
+Groq API (free) for AI + Groq Orpheus TTS + Groq Whisper STT.
 Stateless: client sends full conversation history each request.
 Random case selection for unique sessions.
 """
 
 import os
+import io
 import json
 import random
+import tempfile
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
 from openai import OpenAI
@@ -221,6 +223,38 @@ def tts():
             return jsonify({"error": "TTS failed"}), 500
     except Exception as e:
         print(f"TTS error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/stt", methods=["POST"])
+def stt():
+    """Transcribe audio using Groq Whisper. Accepts audio file upload."""
+    try:
+        if "audio" not in request.files:
+            return jsonify({"error": "No audio file"}), 400
+
+        audio_file = request.files["audio"]
+        client = get_client()
+
+        # Save to temp file (Whisper needs a file-like with name)
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+            audio_file.save(tmp)
+            tmp_path = tmp.name
+
+        try:
+            with open(tmp_path, "rb") as f:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-large-v3",
+                    file=f,
+                    language="de",
+                )
+            text = transcription.text.strip()
+            return jsonify({"text": text})
+        finally:
+            os.unlink(tmp_path)
+
+    except Exception as e:
+        print(f"STT error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
