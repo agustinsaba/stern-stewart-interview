@@ -18,7 +18,6 @@
   .sts.listening{color:#4ade80;background:#0d1f0d}
   .sts.thinking{color:#fbbf24;background:#1f1a0d}
   .sts.speaking{color:#818cf8;background:#0d0d1f}
-  .sts.error{color:#f87171;background:#1f0d0d}
   .chat{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.6rem;scroll-behavior:smooth;-webkit-overflow-scrolling:touch}
   .m{max-width:85%;padding:.75rem 1rem;border-radius:12px;font-size:.88rem;line-height:1.5;animation:si .25s ease;word-wrap:break-word}
   @keyframes si{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
@@ -31,17 +30,14 @@
   .ld span{display:inline-block;width:5px;height:5px;border-radius:50%;background:#818cf8;animation:bn 1.4s infinite;margin-right:3px}
   .ld span:nth-child(2){animation-delay:.2s}.ld span:nth-child(3){animation-delay:.4s}
   @keyframes bn{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-7px)}}
-
   .lv{padding:.5rem 1rem;background:#0a0f0a;border-top:1px solid #1a281a;font-size:.82rem;color:#4ade80;min-height:2.5rem;display:none;flex-shrink:0;max-height:80px;overflow-y:auto}
   .lv.on{display:block}
-
   .ctrl{padding:.8rem 1rem;border-top:1px solid #1a1a28;background:#0c0c14;display:flex;align-items:center;gap:.6rem;flex-shrink:0}
   .mc{width:56px;height:56px;border-radius:50%;border:2px solid #253525;background:#0f1a0f;color:#4ade80;font-size:1.4rem;cursor:pointer;transition:all .2s;flex-shrink:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
   .mc:hover{background:#152015;transform:scale(1.05)}
   .mc.rec{border-color:#f87171;background:#2a0f0f;color:#f87171;animation:gl 1.5s infinite}
   .mc:disabled{opacity:.3;cursor:not-allowed;animation:none}
   @keyframes gl{0%,100%{box-shadow:0 0 0 0 #f8717144}50%{box-shadow:0 0 0 14px #f8717100}}
-
   .ti{flex:1;padding:.65rem .8rem;background:#141420;border:1px solid #252535;border-radius:10px;color:#fff;font-size:.85rem;outline:none;min-width:0}
   .ti:focus{border-color:#4a5aef}
   .ti::placeholder{color:#444}
@@ -50,7 +46,6 @@
   .sb:disabled{opacity:.3;cursor:not-allowed}
   .eb{padding:.65rem .9rem;background:none;border:1px solid #2a2a3a;border-radius:10px;color:#666;cursor:pointer;font-size:.75rem;flex-shrink:0}
   .eb:hover{color:#f87171;border-color:#3a2a2a}
-
   .ss{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:1.2rem;padding:2rem;text-align:center}
   .ss h1{font-size:1.6rem;color:#fff;font-weight:700}
   .ss .logo{font-size:2.5rem;margin-bottom:.5rem}
@@ -60,14 +55,7 @@
   .go:disabled{opacity:.4;cursor:wait}
   .nt{color:#888;font-size:.75rem;min-height:1.2rem}
   .iu{display:none;height:100dvh;flex-direction:column}
-
-  @media(max-width:600px){
-    .hdr h1{font-size:.9rem}
-    .m{max-width:92%;font-size:.84rem}
-    .ctrl{padding:.6rem .8rem;gap:.5rem}
-    .mc{width:50px;height:50px;font-size:1.2rem}
-    .ti{padding:.55rem .7rem;font-size:.8rem}
-  }
+  @media(max-width:600px){.hdr h1{font-size:.9rem}.m{max-width:92%;font-size:.84rem}.ctrl{padding:.6rem .8rem;gap:.5rem}.mc{width:50px;height:50px;font-size:1.2rem}.ti{padding:.55rem .7rem;font-size:.8rem}}
 </style>
 </head>
 <body>
@@ -76,7 +64,7 @@
   <div class="logo">💼</div>
   <h1>Stern Stewart & Co.</h1>
   <p>Case Interview Simulator<br>Dr. Keller, Partner</p>
-  <p style="color:#555;font-size:.78rem">Sprechen Sie auf Deutsch. Daten auch auf Englisch.<br>Druck: mittel bis hoch.</p>
+  <p style="color:#555;font-size:.78rem">Sprechen Sie auf Deutsch. Daten auch auf Englisch.<br>Druck: mittel bis hoch. Jede Session ein neuer Case.</p>
   <button class="go" id="goBtn" onclick="go()">Interview starten</button>
   <p class="nt" id="goN"></p>
   <p style="color:#444;font-size:.65rem;margin-top:.3rem">Chrome oder Edge empfohlen</p>
@@ -102,15 +90,11 @@
 
 <script>
 const API = location.origin;
-
-// State
-let busy = false;
-let active = false;
-let messages = [];
+let busy = false, active = false, messages = [], caseId = null;
 let curAudio = null;
 
 // ═══════════════════════════════════════
-// TTS — calls server /api/tts endpoint
+// TTS — server-side Groq Orpheus (natural voice)
 // ═══════════════════════════════════════
 async function speak(text) {
   setSt('speaking', 'Spricht...');
@@ -118,127 +102,71 @@ async function speak(text) {
     const resp = await fetch(API + '/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text })
+      body: JSON.stringify({ text })
     });
-
-    if (!resp.ok) {
-      console.warn('TTS server failed, using browser fallback');
-      return speakFallback(text);
-    }
-
+    if (!resp.ok) throw new Error('TTS ' + resp.status);
     const blob = await resp.blob();
-    if (blob.size < 100) {
-      console.warn('TTS returned tiny audio, using fallback');
-      return speakFallback(text);
-    }
-
+    if (blob.size < 200) throw new Error('Audio too small');
     const url = URL.createObjectURL(blob);
     return new Promise(resolve => {
       curAudio = new Audio(url);
       curAudio.onended = () => { curAudio = null; URL.revokeObjectURL(url); resolve(); };
-      curAudio.onerror = () => { curAudio = null; URL.revokeObjectURL(url); speakFallback(text).then(resolve); };
-      curAudio.play().catch(() => { curAudio = null; speakFallback(text).then(resolve); });
+      curAudio.onerror = () => { curAudio = null; URL.revokeObjectURL(url); resolve(); };
+      curAudio.play().catch(() => resolve());
     });
   } catch (e) {
-    console.warn('TTS fetch failed:', e);
-    return speakFallback(text);
+    console.warn('TTS failed:', e);
+    // Silent fallback — don't block the interview
   }
-}
-
-function speakFallback(text) {
-  return new Promise(resolve => {
-    if (!window.speechSynthesis) { resolve(); return; }
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/[*_#"]/g, ''));
-    u.lang = 'de-DE'; u.rate = 1.0; u.pitch = 0.9;
-    const voices = window.speechSynthesis.getVoices();
-    const v = voices.find(x => x.lang.startsWith('de') && x.localService) || voices.find(x => x.lang.startsWith('de'));
-    if (v) u.voice = v;
-    u.onend = resolve; u.onerror = resolve;
-    window.speechSynthesis.speak(u);
-  });
 }
 
 function stopAudio() {
   if (curAudio) { try { curAudio.pause(); curAudio.currentTime = 0; } catch(e) {} curAudio = null; }
-  if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
 // ═══════════════════════════════════════
-// SPEECH RECOGNITION — robust approach
+// SPEECH RECOGNITION
 // ═══════════════════════════════════════
-let recognition = null;
-let isRecording = false;
-let transcript = '';
-let silenceTimeout = null;
+let recognition = null, isRecording = false, transcript = '', silenceTimeout = null;
 
 function createRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
-
   const r = new SR();
   r.lang = 'de-DE';
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
 
-  r.onstart = () => {
-    console.log('Recognition started');
-  };
-
   r.onresult = (event) => {
-    let finalText = '';
-    let interimText = '';
-
+    let finalText = '', interimText = '';
     for (let i = 0; i < event.results.length; i++) {
-      const result = event.results[i];
-      if (result.isFinal) {
-        finalText += result[0].transcript;
-      } else {
-        interimText += result[0].transcript;
-      }
+      if (event.results[i].isFinal) finalText += event.results[i][0].transcript;
+      else interimText += event.results[i][0].transcript;
     }
-
     transcript = finalText;
-    const lv = document.getElementById('lv');
-    lv.textContent = finalText + (interimText ? ' ' + interimText + '...' : '');
+    document.getElementById('lv').textContent = finalText + (interimText ? ' ' + interimText + '...' : '');
 
-    // Reset silence timer on any new result
     clearTimeout(silenceTimeout);
     if (finalText.trim().length > 0) {
       silenceTimeout = setTimeout(() => {
-        // 3 seconds of silence after getting final text → auto-send
-        if (isRecording && transcript.trim().length > 2) {
-          stopRecording(true);
-        }
+        if (isRecording && transcript.trim().length > 2) stopRecording(true);
       }, 3000);
     }
   };
 
   r.onerror = (event) => {
-    console.log('Recognition error:', event.error);
+    console.log('Rec error:', event.error);
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      addMsg('s', 'Mikrofon-Zugriff verweigert. Bitte in den Browser-Einstellungen erlauben.');
+      addMsg('s', 'Mikrofon verweigert. Bitte in Browser-Einstellungen erlauben.');
       stopRecording(false);
     } else if (event.error === 'no-speech') {
-      // No speech detected, restart if still recording
-      if (isRecording) {
-        try { r.start(); } catch(e) {}
-      }
-    } else if (event.error === 'network') {
-      addMsg('s', 'Netzwerkfehler bei der Spracherkennung. Bitte Text eingeben.');
-      stopRecording(false);
+      if (isRecording) try { r.start(); } catch(e) {}
     }
   };
 
   r.onend = () => {
-    console.log('Recognition ended, isRecording:', isRecording);
-    // Auto-restart if user hasn't stopped manually
-    if (isRecording) {
-      try { r.start(); } catch(e) {
-        console.log('Could not restart recognition');
-      }
-    }
+    if (isRecording) try { r.start(); } catch(e) {}
   };
 
   return r;
@@ -246,131 +174,74 @@ function createRecognition() {
 
 function micToggle() {
   if (busy) return;
-  if (isRecording) {
-    stopRecording(true); // true = send the transcript
-  } else {
-    startRecording();
-  }
+  isRecording ? stopRecording(true) : startRecording();
 }
 
 function startRecording() {
   if (busy) return;
-  stopAudio(); // Stop Dr. Keller if speaking
-
-  if (!recognition) {
-    recognition = createRecognition();
-  }
-  if (!recognition) {
-    addMsg('s', 'Spracherkennung nicht verfügbar. Bitte Chrome oder Edge verwenden, oder Text eingeben.');
-    return;
-  }
-
+  stopAudio();
+  if (!recognition) recognition = createRecognition();
+  if (!recognition) { addMsg('s', 'Spracherkennung nicht verfuegbar. Chrome oder Edge verwenden.'); return; }
   transcript = '';
   isRecording = true;
   clearTimeout(silenceTimeout);
-
-  const btn = document.getElementById('micB');
-  btn.classList.add('rec');
-  btn.textContent = '⏹';
-  setSt('listening', 'Hört zu...');
-
-  const lv = document.getElementById('lv');
-  lv.classList.add('on');
-  lv.textContent = 'Sprechen Sie jetzt...';
-
-  try {
-    recognition.start();
-  } catch(e) {
-    // Already started, stop and restart
-    try { recognition.stop(); } catch(ex) {}
-    setTimeout(() => {
-      try { recognition.start(); } catch(ex) {
-        addMsg('s', 'Spracherkennung konnte nicht gestartet werden.');
-        stopRecording(false);
-      }
-    }, 200);
+  document.getElementById('micB').classList.add('rec');
+  document.getElementById('micB').textContent = '⏹';
+  setSt('listening', 'Hoert zu...');
+  document.getElementById('lv').classList.add('on');
+  document.getElementById('lv').textContent = 'Sprechen Sie jetzt...';
+  try { recognition.start(); } catch(e) {
+    try { recognition.stop(); } catch(x) {}
+    setTimeout(() => { try { recognition.start(); } catch(x) { stopRecording(false); } }, 200);
   }
 }
 
 function stopRecording(shouldSend) {
   isRecording = false;
   clearTimeout(silenceTimeout);
-
-  const btn = document.getElementById('micB');
-  btn.classList.remove('rec');
-  btn.textContent = '🎤';
-
+  document.getElementById('micB').classList.remove('rec');
+  document.getElementById('micB').textContent = '🎤';
   document.getElementById('lv').classList.remove('on');
-
-  if (recognition) {
-    try { recognition.stop(); } catch(e) {}
-  }
-
-  if (shouldSend && transcript.trim().length > 2) {
-    handleInput(transcript.trim());
-  }
-
+  if (recognition) try { recognition.stop(); } catch(e) {}
+  if (shouldSend && transcript.trim().length > 2) handleInput(transcript.trim());
   transcript = '';
-  setSt('idle', 'Bereit');
+  if (!busy) setSt('idle', 'Bereit');
 }
 
 // ═══════════════════════════════════════
-// UI HELPERS
+// UI
 // ═══════════════════════════════════════
-function setSt(cls, text) {
-  const e = document.getElementById('st');
-  e.className = 'sts ' + cls;
-  e.textContent = text;
-}
+function setSt(c, t) { const e = document.getElementById('st'); e.className = 'sts ' + c; e.textContent = t; }
 
-let timerStart = null, timerInterval = null;
+let timerStart = null, timerInt = null;
 function startTimer() {
   timerStart = Date.now();
-  timerInterval = setInterval(() => {
+  timerInt = setInterval(() => {
     const s = Math.floor((Date.now() - timerStart) / 1000);
-    document.getElementById('tm').textContent =
-      String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    document.getElementById('tm').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
   }, 1000);
 }
 
 function addMsg(role, text) {
-  const ch = document.getElementById('chat');
-  const d = document.createElement('div');
-  if (role === 's') {
-    d.className = 'm s'; d.textContent = text;
-  } else {
-    d.className = 'm ' + (role === 'i' ? 'i' : 'c');
-    d.innerHTML = '<div class="lb">' + (role === 'i' ? 'DR. KELLER' : 'SIE') + '</div>' +
-      text.replace(/\n/g, '<br>');
-  }
-  ch.appendChild(d);
-  ch.scrollTop = ch.scrollHeight;
+  const ch = document.getElementById('chat'), d = document.createElement('div');
+  if (role === 's') { d.className = 'm s'; d.textContent = text; }
+  else { d.className = 'm ' + (role === 'i' ? 'i' : 'c'); d.innerHTML = '<div class="lb">' + (role === 'i' ? 'DR. KELLER' : 'SIE') + '</div>' + text.replace(/\n/g, '<br>'); }
+  ch.appendChild(d); ch.scrollTop = ch.scrollHeight;
 }
-
 function addLoading() {
-  const ch = document.getElementById('chat');
-  const d = document.createElement('div');
+  const ch = document.getElementById('chat'), d = document.createElement('div');
   d.className = 'm i'; d.id = 'ldmsg';
   d.innerHTML = '<div class="lb">DR. KELLER</div><div class="ld"><span></span><span></span><span></span></div>';
   ch.appendChild(d); ch.scrollTop = ch.scrollHeight;
 }
-
-function removeLoading() {
-  const e = document.getElementById('ldmsg');
-  if (e) e.remove();
-}
-
-function setControls(enabled) {
-  document.getElementById('sB').disabled = !enabled;
-  document.getElementById('micB').disabled = !enabled;
-}
+function removeLoading() { const e = document.getElementById('ldmsg'); if (e) e.remove(); }
+function setControls(on) { document.getElementById('sB').disabled = !on; document.getElementById('micB').disabled = !on; }
 
 // ═══════════════════════════════════════
-// CORE: Send message
+// CORE
 // ═══════════════════════════════════════
 function sendText() {
-  const inp = document.getElementById('ti');
-  const t = inp.value.trim();
+  const inp = document.getElementById('ti'), t = inp.value.trim();
   if (!t || busy) return;
   inp.value = '';
   handleInput(t);
@@ -378,145 +249,87 @@ function sendText() {
 
 async function handleInput(text) {
   if (busy || !active) return;
-  busy = true;
-  setControls(false);
-
+  busy = true; setControls(false);
   addMsg('c', text);
   messages.push({ role: 'user', content: text });
-  addLoading();
-  setSt('thinking', 'Denkt nach...');
+  addLoading(); setSt('thinking', 'Denkt nach...');
 
   try {
     const resp = await fetch(API + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages })
+      body: JSON.stringify({ messages, case_id: caseId })
     });
     const data = await resp.json();
     removeLoading();
-
-    if (data.error) {
-      addMsg('s', 'Fehler: ' + data.error);
-    } else if (data.reply) {
+    if (data.error) { addMsg('s', 'Fehler: ' + data.error); }
+    else if (data.reply) {
+      if (data.case_id) caseId = data.case_id;
       messages.push({ role: 'assistant', content: data.reply });
       addMsg('i', data.reply);
       await speak(data.reply);
     }
-  } catch (e) {
-    removeLoading();
-    addMsg('s', 'Verbindungsfehler: ' + e.message);
-  }
+  } catch (e) { removeLoading(); addMsg('s', 'Verbindungsfehler: ' + e.message); }
 
-  setSt('idle', 'Bereit');
-  busy = false;
-  setControls(true);
+  setSt('idle', 'Bereit'); busy = false; setControls(true);
 }
 
 // ═══════════════════════════════════════
-// START INTERVIEW
+// START
 // ═══════════════════════════════════════
 async function go() {
-  const btn = document.getElementById('goBtn');
-  const note = document.getElementById('goN');
-  btn.disabled = true;
-  note.textContent = 'Verbinde mit Dr. Keller...';
-
-  // Pre-load browser voices as fallback
-  if (window.speechSynthesis) window.speechSynthesis.getVoices();
+  const btn = document.getElementById('goBtn'), note = document.getElementById('goN');
+  btn.disabled = true; note.textContent = 'Verbinde mit Dr. Keller...';
 
   // Request mic permission early
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(t => t.stop());
-  } catch(e) {
-    console.log('Mic permission not granted yet');
-  }
+  try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach(t => t.stop()); }
+  catch(e) { console.log('Mic not granted yet'); }
 
-  messages = [{
-    role: 'user',
-    content: 'Bitte stellen Sie sich kurz vor und präsentieren Sie den Case. Maximal 4 bis 5 Sätze, gesprochen, direkt.'
-  }];
+  messages = [{ role: 'user', content: 'Bitte stellen Sie sich kurz vor und praesentieren Sie den Case. Maximal 4 bis 5 Saetze, gesprochen, direkt.' }];
+  caseId = null; // Server picks random case
 
   try {
     const resp = await fetch(API + '/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages })
+      body: JSON.stringify({ messages })
     });
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
-    if (!data.reply) throw new Error('Keine Antwort vom Server');
-
+    if (!data.reply) throw new Error('Keine Antwort');
+    if (data.case_id) caseId = data.case_id;
     messages.push({ role: 'assistant', content: data.reply });
 
     document.getElementById('S').style.display = 'none';
     document.getElementById('I').style.display = 'flex';
-    active = true;
-    startTimer();
-
+    active = true; startTimer();
     addMsg('i', data.reply);
     await speak(data.reply);
     setSt('idle', 'Bereit');
-  } catch (e) {
-    note.textContent = 'Fehler: ' + e.message;
-    btn.disabled = false;
-  }
+  } catch (e) { note.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
 }
 
 // ═══════════════════════════════════════
-// END INTERVIEW
+// END
 // ═══════════════════════════════════════
 async function endInterview() {
   if (!active || busy) return;
-  active = false; busy = true;
-  stopRecording(false);
-  stopAudio();
+  active = false; busy = true; stopRecording(false); stopAudio();
+  addMsg('s', 'Interview wird beendet...'); addLoading(); setSt('thinking', 'Debrief...');
 
-  addMsg('s', 'Interview wird beendet — Debrief folgt...');
-  addLoading();
-  setSt('thinking', 'Debrief...');
-
-  messages.push({
-    role: 'user',
-    content: 'Das Interview ist zu Ende. Gib jetzt das strukturierte Feedback auf Deutsch. Bewerte Structure, Analysis, Quantitative Performance, Communication jeweils 1 bis 5. Gib eine Overall Recommendation: PASS, BORDERLINE, oder FAIL. Beschreibe wie ein Top 10 Prozent Kandidat den Case angegangen wäre. Schreib es als gesprochenen Text ohne Sonderzeichen.'
-  });
+  messages.push({ role: 'user', content: 'Das Interview ist zu Ende. Gib jetzt das strukturierte Feedback auf Deutsch. Bewerte Structure, Analysis, Quantitative Performance, Communication jeweils 1 bis 5. Gib eine Overall Recommendation: PASS, BORDERLINE, oder FAIL. Beschreibe wie ein Top 10 Prozent Kandidat den Case angegangen waere. Schreib es als gesprochenen Text ohne Sonderzeichen.' });
 
   try {
-    const resp = await fetch(API + '/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages })
-    });
-    const data = await resp.json();
-    removeLoading();
-    if (data.reply) {
-      messages.push({ role: 'assistant', content: data.reply });
-      addMsg('i', data.reply);
-      await speak(data.reply);
-    }
-  } catch (e) {
-    removeLoading();
-    addMsg('s', 'Debrief fehlgeschlagen.');
-  }
+    const resp = await fetch(API + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages, case_id: caseId }) });
+    const data = await resp.json(); removeLoading();
+    if (data.reply) { messages.push({ role: 'assistant', content: data.reply }); addMsg('i', data.reply); await speak(data.reply); }
+  } catch (e) { removeLoading(); addMsg('s', 'Debrief fehlgeschlagen.'); }
 
-  clearInterval(timerInterval);
-  setSt('idle', 'Fertig');
-  busy = false;
+  clearInterval(timerInt); setSt('idle', 'Fertig'); busy = false;
 }
 
-// Spacebar shortcut for mic
-document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT' && active) {
-    e.preventDefault();
-    micToggle();
-  }
-});
-
-// Pre-load voices
-if (window.speechSynthesis) {
-  window.speechSynthesis.getVoices();
-  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
-}
+// Spacebar shortcut
+document.addEventListener('keydown', e => { if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT' && active) { e.preventDefault(); micToggle(); } });
 </script>
 </body>
 </html>
